@@ -261,7 +261,6 @@ def make_aihubmix_api_request(
     reasoning_max_tokens: Optional[int] = None,
     reasoning_enabled: bool = True,
     reasoning_exclude: bool = False,
-    verbose: bool = False,
 ):
     """Make AIHubMix API request with retry logic.
 
@@ -282,6 +281,7 @@ def make_aihubmix_api_request(
     Returns:
         Processed response object with type and data
     """
+    verbose = False
     # Determine API keys to use
     api_keys = []
     if isinstance(aihubmix_api_keys, list):
@@ -1078,7 +1078,6 @@ def run_single_task(
     reasoning_max_tokens: Optional[int] = None,
     reasoning_enabled: bool = True,
     reasoning_exclude: bool = False,
-    verbose: bool = False,
     config_name: str = "",
 ):
     """Run a single task with configurable environment and tools.
@@ -1117,6 +1116,7 @@ def run_single_task(
     Returns:
         Dictionary with task results
     """
+    verbose = False
     task_label = f"{config_name}-State{run_id}" if config_name else f"Config{config_id}-Run{run_id}"
     if verbose:
         print(f"[Task {task_id} | {task_label}] Starting...")
@@ -1170,8 +1170,8 @@ def run_single_task(
         if "seed" not in prepared_env_params:
             prepared_env_params["seed"] = random.randint(0, 1000000)
 
-        # Create environment (suppress preprocessing output unless verbose)
-        with suppress_all_output() if not verbose else contextlib.nullcontext():
+        # Always suppress preprocessing output in runner mode.
+        with suppress_all_output():
             env = EnvClass(**prepared_env_params)
         if verbose:
             print(f"[Task {task_id} | {task_label}] Environment created successfully")
@@ -1196,8 +1196,8 @@ def run_single_task(
 
         env = ToolEnvWrapperOpenAI(env, tools=[tool], max_tool_uses=max_tool_uses)
 
-        # Reset environment (suppress preprocessing output unless verbose)
-        with suppress_all_output() if not verbose else contextlib.nullcontext():
+        # Always suppress preprocessing output in runner mode.
+        with suppress_all_output():
             obs, info, user_prompt, tools = env.reset()
 
         # Save tools information for later storage
@@ -1302,7 +1302,6 @@ def run_single_task(
                 reasoning_max_tokens=reasoning_max_tokens,
                 reasoning_enabled=reasoning_enabled,
                 reasoning_exclude=reasoning_exclude,
-                verbose=verbose,
             )
 
             # Track API usage per step
@@ -1396,11 +1395,8 @@ def run_single_task(
             if verbose:
                 print("response", response)
 
-            if not verbose:
-                with suppress_all_output():
-                    next_obs, reward, terminated, truncated, info = env.step_openai(response, verbose=verbose)
-            else:
-                next_obs, reward, terminated, truncated, info = env.step_openai(response, verbose=verbose)
+            with suppress_all_output():
+                next_obs, reward, terminated, truncated, info = env.step_openai(response, verbose=False)
 
             if verbose:
                 print("next_obs", next_obs)
@@ -1763,7 +1759,6 @@ def run_single_task(
                         reasoning_max_tokens=reasoning_max_tokens,
                         reasoning_enabled=reasoning_enabled,
                         reasoning_exclude=reasoning_exclude,
-                        verbose=verbose,
                     )
                     
                     # Update messages if they were trimmed (before generating summary)
@@ -2317,7 +2312,6 @@ def run_config_combinations(
     reasoning_enabled: bool = True,
     reasoning_exclude: bool = False,
     resume_dir: Optional[str] = None,
-    verbose: bool = False,
 ):
     """Run multiple configurations in parallel with flexible environment and tool setup.
 
@@ -2356,12 +2350,10 @@ def run_config_combinations(
         Note: context_reset and context_summary are mutually exclusive.
               If both are False, no context management is performed.
     """
-    # Set LOCA_QUIET based on verbose flag (controls MCP server output)
-    os.environ["LOCA_QUIET"] = "0" if verbose else "1"
-
-    # Also set logging level based on verbose
-    if not verbose:
-        logging.getLogger().setLevel(logging.WARNING)
+    verbose = False
+    # Runner mode is always quiet.
+    os.environ["LOCA_QUIET"] = "1"
+    logging.getLogger().setLevel(logging.WARNING)
 
     # Check for resume mode
     configs_to_resume = None
@@ -2615,7 +2607,6 @@ def run_config_combinations(
                     config_reasoning_max_tokens,
                     config_reasoning_enabled,
                     config_reasoning_exclude,
-                    verbose,
                     config_name,
                 ))
                 task_id += 1
@@ -2685,7 +2676,6 @@ def run_config_combinations(
                     config_reasoning_max_tokens,
                     config_reasoning_enabled,
                     config_reasoning_exclude,
-                    verbose,
                     cfg_name,
                 ))
                 task_id += 1
@@ -2778,26 +2768,54 @@ def run_config_combinations(
                 for args in task_args
             }
 
-            if verbose:
-                # Verbose mode: print detailed output
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
+            from rich.console import Console
+
+            console = Console()
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TaskProgressColumn(),
+                TimeElapsedColumn(),
+                console=console,
+                transient=False,
+            ) as progress:
+                task_progress = progress.add_task(
+                    f"[cyan]Running {len(task_args)} tasks ({max_workers} workers)",
+                    total=len(task_args)
+                )
+
                 for future in as_completed(futures):
                     task_id, config_id, run_id = futures[future]
                     try:
                         result = future.result()
                         results.append(result)
-                        task_name = result.get("config_name", f"config_{config_id}")
-                        print(f"\n{'=' * 80}")
-                        print(f"Task {task_id} ({task_name}, state{run_id}) finished: {result['status']}")
+                        completed_count += 1
                         if result['status'] == 'success':
-                            v_tokens = result.get('api_total_tokens', 0)
-                            v_trimmed = result.get('trimmed_tokens', 0)
-                            v_tok_str = f"{v_tokens:,}" if v_trimmed == 0 else f"{v_tokens:,} ({v_tokens + v_trimmed:,} incl. trimmed)"
-                            print(f"  Steps: {result['steps']}, Accuracy: {result.get('accuracy', result['final_reward'])}, Tokens: {v_tok_str}")
-                        print(f"{'=' * 80}\n")
+                            success_count += 1
+                            acc = result.get('accuracy', result.get('final_reward', 0))
+                            if acc is not None:
+                                total_accuracy += acc
+                                accuracy_count += 1
+                        else:
+                            error_count += 1
+
+                        # Print per-task completion line
+                        task_name = result.get("config_name", f"config_{config_id}")
+                        state = f"state{run_id}"
+                        r_acc = result.get('accuracy', 0)
+                        r_steps = result.get('steps', '?')
+                        r_tokens = result.get('api_total_tokens', 0)
+                        r_trimmed = result.get('trimmed_tokens', 0)
+                        r_tokens_incl = r_tokens + r_trimmed
+                        tok_str = f"{r_tokens:,} tok" if r_trimmed == 0 else f"{r_tokens:,} tok ({r_tokens_incl:,} incl. trimmed)"
+                        if result['status'] == 'success' and r_acc > 0:
+                            progress.console.print(f"  [green]\u2713[/green] {task_name} {state} \u2014 passed (acc: {r_acc}, {r_steps} steps, {tok_str})")
+                        else:
+                            progress.console.print(f"  [red]\u2717[/red] {task_name} {state} \u2014 failed (acc: {r_acc}, {r_steps} steps, {tok_str})")
                     except Exception as e:
-                        print(f"\n{'=' * 80}")
-                        print(f"Task {task_id} (config_{config_id}, state{run_id}) raised an exception: {e}")
-                        print(f"{'=' * 80}\n")
                         results.append({
                             "task_id": task_id,
                             "config_id": config_id,
@@ -2805,77 +2823,17 @@ def run_config_combinations(
                             "status": "exception",
                             "error": str(e),
                         })
-            else:
-                # Non-verbose mode: use Rich progress display
-                from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeElapsedColumn
-                from rich.console import Console
-                from rich.table import Table
-                from rich.live import Live
-                from rich.panel import Panel
+                        completed_count += 1
+                        error_count += 1
+                        progress.console.print(f"  [red]\u2717[/red] config_{config_id} state{run_id} \u2014 exception: {e}")
 
-                console = Console()
-
-                with Progress(
-                    SpinnerColumn(),
-                    TextColumn("[progress.description]{task.description}"),
-                    BarColumn(),
-                    TaskProgressColumn(),
-                    TimeElapsedColumn(),
-                    console=console,
-                    transient=False,
-                ) as progress:
-                    task_progress = progress.add_task(
-                        f"[cyan]Running {len(task_args)} tasks ({max_workers} workers)",
-                        total=len(task_args)
+                    # Update progress bar description with stats
+                    avg_acc = total_accuracy / accuracy_count if accuracy_count > 0 else 0
+                    progress.update(
+                        task_progress,
+                        advance=1,
+                        description=f"[cyan]Tasks: {completed_count}/{len(task_args)} | Success: {success_count} | Errors: {error_count} | Avg Acc: {avg_acc:.2%}"
                     )
-
-                    for future in as_completed(futures):
-                        task_id, config_id, run_id = futures[future]
-                        try:
-                            result = future.result()
-                            results.append(result)
-                            completed_count += 1
-                            if result['status'] == 'success':
-                                success_count += 1
-                                acc = result.get('accuracy', result.get('final_reward', 0))
-                                if acc is not None:
-                                    total_accuracy += acc
-                                    accuracy_count += 1
-                            else:
-                                error_count += 1
-
-                            # Print per-task completion line
-                            task_name = result.get("config_name", f"config_{config_id}")
-                            state = f"state{run_id}"
-                            r_acc = result.get('accuracy', 0)
-                            r_steps = result.get('steps', '?')
-                            r_tokens = result.get('api_total_tokens', 0)
-                            r_trimmed = result.get('trimmed_tokens', 0)
-                            r_tokens_incl = r_tokens + r_trimmed
-                            tok_str = f"{r_tokens:,} tok" if r_trimmed == 0 else f"{r_tokens:,} tok ({r_tokens_incl:,} incl. trimmed)"
-                            if result['status'] == 'success' and r_acc > 0:
-                                progress.console.print(f"  [green]\u2713[/green] {task_name} {state} \u2014 passed (acc: {r_acc}, {r_steps} steps, {tok_str})")
-                            else:
-                                progress.console.print(f"  [red]\u2717[/red] {task_name} {state} \u2014 failed (acc: {r_acc}, {r_steps} steps, {tok_str})")
-                        except Exception as e:
-                            results.append({
-                                "task_id": task_id,
-                                "config_id": config_id,
-                                "run_id": run_id,
-                                "status": "exception",
-                                "error": str(e),
-                            })
-                            completed_count += 1
-                            error_count += 1
-                            progress.console.print(f"  [red]\u2717[/red] config_{config_id} state{run_id} \u2014 exception: {e}")
-
-                        # Update progress bar description with stats
-                        avg_acc = total_accuracy / accuracy_count if accuracy_count > 0 else 0
-                        progress.update(
-                            task_progress,
-                            advance=1,
-                            description=f"[cyan]Tasks: {completed_count}/{len(task_args)} | Success: {success_count} | Errors: {error_count} | Avg Acc: {avg_acc:.2%}"
-                        )
 
     finally:
         # Restore original signal handlers
@@ -2952,65 +2910,6 @@ def run_config_combinations(
     avg_tokens_incl_reset = sum(all_tokens_incl_reset) / len(all_tokens_incl_reset) if all_tokens_incl_reset else None
     avg_tokens_incl_all = sum(all_tokens_incl_all) / len(all_tokens_incl_all) if all_tokens_incl_all else None
 
-    # Print summary (verbose mode only)
-    if verbose:
-        print("\n" + "=" * 80)
-        if resume_dir:
-            print("PARALLEL INFERENCE SUMMARY (RESUME MODE)")
-        else:
-            print("PARALLEL INFERENCE SUMMARY")
-        print("=" * 80)
-        if resume_dir:
-            print(f"Resume directory: {resume_dir}")
-        print(f"Total configurations: {len(configs)}")
-        print(f"Unique config groups: {len(config_groups)}")
-        print(f"Runs per configuration: {runs_per_config}")
-        print(f"Total tasks executed: {len(task_args)}")
-        if resume_dir and skipped_count > 0:
-            print(f"Skipped (already completed): {skipped_count}")
-        print(f"Total time: {elapsed_time:.2f} seconds")
-        if len(task_args) > 0:
-            print(f"Average time per task: {elapsed_time / len(task_args):.2f} seconds")
-
-        print(f"\nOverall Success: {total_success}/{len(task_args)}")
-        print(f"Overall Failed: {total_error}/{len(task_args)}")
-
-        # Print per-configuration statistics
-        if group_by_seed:
-            print("\nPer-Group Results:")
-            for group_id in sorted(config_stats.keys()):
-                stats = config_stats[group_id]
-                config_indices = config_groups.get(group_id, [group_id])
-                # Use first config in group as representative
-                config_idx = config_indices[0] if config_indices else group_id
-                if config_idx < len(configs):
-                    config = configs[config_idx]
-                    print(f"\n  Group {group_id}:")
-                    print(f"    Environment: {config['env_class']}")
-                    print(f"    Config indices: {config_indices}")
-                    print(f"    Success: {stats['success']}/{stats['total']}")
-                    if stats['accuracies']:
-                        grp_avg_accuracy = sum(stats['accuracies']) / len(stats['accuracies'])
-                        grp_avg_steps = sum(stats['steps']) / len(stats['steps'])
-                        print(f"    Avg Accuracy: {grp_avg_accuracy:.4f}")
-                        print(f"    Avg Steps: {grp_avg_steps:.2f}")
-                        print(f"    Accuracies: {stats['accuracies']}")
-        else:
-            print("\nPer-Configuration Results:")
-            for config_id in sorted(config_stats.keys()):
-                stats = config_stats[config_id]
-                if config_id < len(configs):
-                    config = configs[config_id]
-                    print(f"\n  Config {config_id}:")
-                    print(f"    Environment: {config['env_class']}")
-                    print(f"    Success: {stats['success']}/{stats['total']}")
-                    if stats['accuracies']:
-                        cfg_avg_accuracy = sum(stats['accuracies']) / len(stats['accuracies'])
-                        cfg_avg_steps = sum(stats['steps']) / len(stats['steps'])
-                        print(f"    Avg Accuracy: {cfg_avg_accuracy:.4f}")
-                        print(f"    Avg Steps: {cfg_avg_steps:.2f}")
-                        print(f"    Accuracies: {stats['accuracies']}")
-
     # Save results.json (use task names as keys when available)
     results_file = Path(output_dir) / "results.json"
     per_config_data = {}
@@ -3079,12 +2978,7 @@ def run_config_combinations(
     with open(all_traj_file, "w") as f:
         json.dump(aggregated, f, indent=2)
 
-    if verbose:
-        print(f"\nResults saved to: {results_file}")
-        print(f"Aggregated trajectories saved to: {all_traj_file}")
-        print("=" * 80)
-
-    # Always print a summary table (both verbose and non-verbose)
+    # Print summary table.
     from rich.console import Console as _SummaryConsole
     _sc = _SummaryConsole()
     _line = "=" * 50
@@ -3118,4 +3012,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
