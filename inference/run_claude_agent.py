@@ -927,6 +927,7 @@ def run_config_combinations(
     runs_per_config: int = 1,
     base_task_dir: str = "",
     output_dir: str = "",
+    model: Optional[str] = None,
     max_tool_uses: int = 100,
     max_workers: Optional[int] = None,
     group_by_seed: bool = True,
@@ -948,6 +949,8 @@ def run_config_combinations(
         runs_per_config: Number of runs per configuration
         base_task_dir: Base directory for task workspaces
         output_dir: Directory to save episode results
+        model: Model name for Claude Agent SDK / Anthropic-compatible endpoints.
+               If None, falls back to ANTHROPIC_MODEL env var.
         max_tool_uses: Maximum tool uses per episode
         max_workers: Maximum parallel workers
         group_by_seed: If True, group configs that differ only by seed as same config
@@ -972,6 +975,10 @@ def run_config_combinations(
     _use_clear_tool_results = str_to_bool(use_clear_tool_results)
     _group_by_seed = str_to_bool(group_by_seed)
     _disable_compact = str_to_bool(disable_compact)
+    effective_model = model or os.environ.get("ANTHROPIC_MODEL")
+
+    if effective_model:
+        os.environ["ANTHROPIC_MODEL"] = effective_model
 
     # Set environment variables for Claude Agent SDK context management
     if _use_clear_tool_uses:
@@ -1006,6 +1013,8 @@ def run_config_combinations(
     print(f"Compaction: enabled={not _disable_compact}, autocompact_pct={autocompact_pct}%")
     print(f"Token thresholds: max={api_max_input_tokens}, target={api_target_input_tokens}")
     print(f"Prompt caching: {'disabled' if _disable_prompt_caching else 'enabled'}")
+    if effective_model:
+        print(f"Model: {effective_model}")
     # Load configurations
     with open(config_file, "r") as f:
         config_data = json.load(f)
@@ -1272,7 +1281,7 @@ def run_config_combinations(
         "runs_per_config": runs_per_config,
         "total_tasks": total_tasks,
         "max_workers": max_workers,
-        "model": "claude-agent-sdk",
+        "model": effective_model or "claude-agent-sdk",
         "elapsed_time": elapsed_time,
         "total_success": total_success,
         "total_error": total_error,
@@ -1329,7 +1338,7 @@ def run_config_combinations(
     all_steps = [r["steps"] for r in results if r["status"] == "success"]
     results_data = {
         "metadata": {
-            "model": "claude-agent-sdk",
+            "model": effective_model or "claude-agent-sdk",
             "timestamp": int(time.time()),
             "elapsed_seconds": round(elapsed_time, 2),
             "total_tasks": len(task_args),

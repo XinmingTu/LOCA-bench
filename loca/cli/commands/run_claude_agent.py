@@ -7,7 +7,7 @@
 import os
 import sys
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Optional
 
 import typer
 from rich.console import Console
@@ -113,6 +113,16 @@ def run_claude_agent_command(
             rich_help_panel="Compaction",
         ),
     ] = 80,
+    # API Settings
+    model: Annotated[
+        Optional[str],
+        typer.Option(
+            "--model",
+            "-m",
+            help="Model name for Claude Agent SDK / Anthropic-compatible endpoints.",
+            rich_help_panel="API Settings",
+        ),
+    ] = None,
 ) -> None:
     """Run evaluations using the Claude Agent SDK.
 
@@ -124,6 +134,8 @@ def run_claude_agent_command(
     """
     # Read API key from environment
     api_key = os.environ.get("LOCA_ANTHROPIC_API_KEY", "")
+    base_url = os.environ.get("LOCA_ANTHROPIC_BASE_URL", "") or os.environ.get("ANTHROPIC_BASE_URL", "")
+    effective_model = model or os.environ.get("ANTHROPIC_MODEL", "")
     if not api_key:
         console.print(
             "[red]Error:[/red] LOCA_ANTHROPIC_API_KEY environment variable is not set."
@@ -133,6 +145,12 @@ def run_claude_agent_command(
     # Set auth env vars for Claude Agent SDK
     os.environ["ANTHROPIC_AUTH_TOKEN"] = api_key
     os.environ["ANTHROPIC_API_KEY"] = ""
+    if base_url:
+        os.environ["ANTHROPIC_BASE_URL"] = base_url
+    else:
+        os.environ.pop("ANTHROPIC_BASE_URL", None)
+    if effective_model:
+        os.environ["ANTHROPIC_MODEL"] = effective_model
 
     # Set up PYTHONPATH
     mcp_convert_path = PROJECT_ROOT / "mcp-convert"
@@ -158,6 +176,7 @@ def run_claude_agent_command(
     # Build output directory
     final_output_dir = build_claude_agent_output_dir(
         config_file=config_file,
+        model=effective_model or None,
         use_clear_tool_uses=use_clear_tool_uses,
         use_clear_tool_results=use_clear_tool_results,
         disable_prompt_caching=disable_prompt_caching,
@@ -179,6 +198,10 @@ def run_claude_agent_command(
 
     table.add_row("Config file", str(full_config_path))
     table.add_row("Max workers", str(max_workers))
+    if effective_model:
+        table.add_row("Model", effective_model)
+    if base_url:
+        table.add_row("Base URL", base_url)
     table.add_row("", "")
     table.add_row("[bold]Context Management[/bold]", "")
     table.add_row("  Clear tool uses", str(use_clear_tool_uses))
@@ -211,6 +234,7 @@ def run_claude_agent_command(
         runs_per_config=1,
         base_task_dir=str(task_dir),
         output_dir=str(final_output_dir),
+        model=effective_model or None,
         max_tool_uses=max_tool_uses,
         max_workers=max_workers,
         group_by_seed=True,

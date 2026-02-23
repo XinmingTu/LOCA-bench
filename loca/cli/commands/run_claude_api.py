@@ -176,6 +176,7 @@ def run_claude_api_command(
     """
     # Read API key from environment
     api_key = os.environ.get("LOCA_ANTHROPIC_API_KEY", "")
+    base_url = os.environ.get("LOCA_ANTHROPIC_BASE_URL", "") or os.environ.get("ANTHROPIC_BASE_URL", "")
     if not api_key:
         console.print(
             "[red]Error:[/red] LOCA_ANTHROPIC_API_KEY environment variable is not set."
@@ -233,6 +234,8 @@ def run_claude_api_command(
     table.add_row("[bold]Model Configuration[/bold]", "")
     table.add_row("  Model", model)
     table.add_row("  Max tokens", str(max_tokens))
+    if base_url:
+        table.add_row("  Base URL", base_url)
     table.add_row("", "")
     table.add_row("[bold]Extended Thinking[/bold]", "")
     table.add_row("  Enabled", str(enable_thinking))
@@ -278,6 +281,7 @@ def run_claude_api_command(
         base_task_dir=str(task_dir),
         output_dir=str(final_output_dir),
         api_key=api_key,
+        base_url=base_url or None,
         model=model,
         max_tool_uses=max_tool_uses,
         max_tokens=max_tokens,

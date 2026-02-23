@@ -218,10 +218,31 @@ Then open `http://localhost:8000` in your browser. It will show you visualizatio
 export LOCA_ANTHROPIC_API_KEY=your_key_here
 ```
 
+Optional: use a custom Anthropic-compatible endpoint:
+
+```bash
+export LOCA_ANTHROPIC_BASE_URL=your_base_url_here
+# Fallback also supported:
+# export ANTHROPIC_BASE_URL=your_base_url_here
+```
+
+Optional: choose model for Claude Agent SDK path:
+
+```bash
+export ANTHROPIC_MODEL=deepseek-chat
+```
+
+You can also pass `--model` to `run-claude-agent` (higher priority than `ANTHROPIC_MODEL`).
+
 ### Run with Claude Agent SDK / Claude Code
 
 ```bash
 loca run-claude-agent -c task-configs/final_8k_set_config.json
+```
+
+With custom model:
+```bash
+loca run-claude-agent -c task-configs/final_8k_set_config.json -m deepseek-chat
 ```
 
 View all options:
@@ -329,4 +350,3 @@ If you find LOCA-bench useful in your research, please cite our paper:
   year    = {2026}
 }
 ```
-

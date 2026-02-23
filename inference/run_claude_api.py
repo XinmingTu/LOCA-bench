@@ -794,6 +794,7 @@ def run_single_task(
     env_params: Dict[str, Any],
     mcp_configs: Dict[str, Any],
     api_key: str,
+    base_url: Optional[str] = None,
     model: str = "claude-sonnet-4-5",
     max_tool_uses: int = 100,
     max_tokens: int = 4096,
@@ -833,6 +834,7 @@ def run_single_task(
         env_params: Parameters for environment initialization
         mcp_configs: MCP server configurations
         api_key: Anthropic API key
+        base_url: Anthropic-compatible base URL (default: provider/library default)
         model: Claude model name
         max_tool_uses: Maximum number of tool uses
         max_tokens: Maximum tokens per generation
@@ -862,6 +864,8 @@ def run_single_task(
     print(f"[{task_label}] Starting...")
     print(f"[{task_label}] Environment: {env_class}")
     print(f"[{task_label}] Params: {env_params}")
+    if base_url:
+        print(f"[{task_label}] Anthropic base URL: {base_url}")
 
     # Print thinking configuration
     if enable_thinking:
@@ -1033,7 +1037,10 @@ def run_single_task(
         print(f"[{task_label}] has_memory_tool={has_memory_tool}, enable_code_execution={enable_code_execution}, programmatic_tool_calling={enable_programmatic_tool_calling}")
 
         # Initialize Claude client
-        client = anthropic.Anthropic(api_key=api_key)
+        if base_url:
+            client = anthropic.Anthropic(api_key=api_key, base_url=base_url)
+        else:
+            client = anthropic.Anthropic(api_key=api_key)
 
         # Initialize messages in Claude native format (no more format conversion!)
         claude_messages = [{"role": "user", "content": user_prompt}]
@@ -1673,6 +1680,7 @@ def run_config_combinations(
     base_task_dir: str = "",
     output_dir: str = "",
     api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
     model: str = "claude-sonnet-4-5",
     max_tool_uses: int = 100,
     max_tokens: int = 4096,
@@ -1708,6 +1716,7 @@ def run_config_combinations(
         base_task_dir: Base directory for task workspaces
         output_dir: Directory to save episode results
         api_key: Anthropic API key (if None, will use ANTHROPIC_API_KEY from env)
+        base_url: Anthropic-compatible base URL (if None, will use env fallback)
         model: Claude model name (must support extended thinking if enable_thinking=True)
         max_tool_uses: Maximum tool uses per episode
         max_tokens: Maximum tokens per generation (includes thinking budget)
@@ -1757,6 +1766,8 @@ def run_config_combinations(
         api_key = os.environ.get("LOCA_ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("API key not provided and LOCA_ANTHROPIC_API_KEY / ANTHROPIC_API_KEY not set in environment")
+    if base_url is None:
+        base_url = os.environ.get("LOCA_ANTHROPIC_BASE_URL") or os.environ.get("ANTHROPIC_BASE_URL")
 
     # Group configurations if group_by_seed is enabled
     if _group_by_seed:
@@ -1792,6 +1803,8 @@ def run_config_combinations(
     print(f"Total tasks: {total_tasks}")
     print(f"Max workers: {max_workers}")
     print(f"Model: {model}")
+    if base_url:
+        print(f"Anthropic base URL: {base_url}")
     print(f"Base task directory: {base_task_dir}")
     print(f"Output directory: {output_dir}")
     if _enable_thinking:
@@ -1861,6 +1874,7 @@ def run_config_combinations(
                     config["env_params"],
                     config["mcp_servers"],
                     api_key,
+                    base_url,
                     model,
                     max_tool_uses,
                     max_tokens,
@@ -1899,6 +1913,7 @@ def run_config_combinations(
                     config["env_params"],
                     config["mcp_servers"],
                     api_key,
+                    base_url,
                     model,
                     max_tool_uses,
                     max_tokens,

@@ -224,6 +224,7 @@ def build_claude_api_output_dir(
 
 def build_claude_agent_output_dir(
     config_file: str,
+    model: Optional[str] = None,
     use_clear_tool_uses: bool = False,
     use_clear_tool_results: bool = False,
     disable_prompt_caching: bool = False,
@@ -234,6 +235,7 @@ def build_claude_agent_output_dir(
 
     Args:
         config_file: Config filename (basename extracted).
+        model: Model name for Claude Agent SDK / Anthropic-compatible endpoints.
         use_clear_tool_uses: Whether clear tool uses is enabled.
         use_clear_tool_results: Whether clear tool results is enabled.
         disable_prompt_caching: Whether prompt caching is disabled.
@@ -246,6 +248,9 @@ def build_claude_agent_output_dir(
     config_basename = Path(config_file).stem
 
     suffix = ""
+    if model:
+        model_safe = sanitize_model_name(model)
+        suffix += f"_{model_safe}"
     if use_clear_tool_uses:
         suffix += "_CTU"
     if use_clear_tool_results:
